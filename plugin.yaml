@@ -1,0 +1,39 @@
+name: "@kalo-build/plugin-morpherepo-go-psql"
+displayName: "MorpheRepo Go PSQL"
+description: "Generates Go PostgreSQL repository implementations from MorpheRepo data access contracts and Morphe model definitions. Creates concrete pgxpool-backed structs implementing the repository interfaces."
+version: "1.0.0"
+
+input:
+  format: "KA:MR1:YAML1"
+  description: "MorpheRepo YAML contract files"
+  suggestedStore:
+    name: "KA_RE_YAML"
+    type: "localFileSystem"
+    path: "./morphe/repo"
+
+output:
+  format: "KA:MR1:GO_PSQL1"
+  description: "Go PostgreSQL repository implementation files"
+  suggestedStore:
+    name: "KA_RE_GO_PSQL"
+    type: "localFileSystem"
+    path: "./internal/database/repo"
+
+configSchema:
+  models:
+    type: object
+    description: "Go models package configuration"
+    properties:
+      PackagePath:
+        type: string
+        description: "Full Go import path of the models package"
+  repo:
+    type: object
+    description: "Go repository package configuration"
+    properties:
+      PackagePath:
+        type: string
+        description: "Full Go import path of the generated repository package"
+  morpheRegistryPath:
+    type: string
+    description: "Path to the Morphe registry directory containing models"

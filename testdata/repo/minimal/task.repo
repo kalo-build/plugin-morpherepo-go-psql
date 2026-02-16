@@ -1,0 +1,20 @@
+name: TaskRepository
+model: Task
+
+identifiers:
+  primary:
+    fields:
+      - name: ID
+        type: UUID
+
+filters:
+  - name: projectID
+    type: UUID
+    relation: Project
+
+operations:
+  list: true
+  get: true
+  create: true
+  update: true
+  delete: true

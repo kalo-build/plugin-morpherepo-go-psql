@@ -1,0 +1,21 @@
+name: OrganizationRepository
+model: Organization
+
+identifiers:
+  primary:
+    fields:
+      - name: ID
+        type: UUID
+  code:
+    fields:
+      - name: Code
+        type: String
+
+filters: []
+
+operations:
+  list: true
+  get: true
+  create: true
+  update: true
+  delete: true

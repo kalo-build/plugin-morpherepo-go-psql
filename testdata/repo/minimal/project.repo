@@ -1,0 +1,24 @@
+name: ProjectRepository
+model: Project
+
+identifiers:
+  primary:
+    fields:
+      - name: ID
+        type: UUID
+  code:
+    fields:
+      - name: Code
+        type: String
+
+filters:
+  - name: organizationID
+    type: UUID
+    relation: Organization
+
+operations:
+  list: true
+  get: true
+  create: true
+  update: true
+  delete: true
