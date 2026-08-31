@@ -5,9 +5,11 @@ fields:
   Title:
     type: String
   Status:
-    type: String
+    type: TaskStatus
 identifiers:
   primary: ID
 related:
   Project:
     type: ForOne
+    attributes:
+      - optional

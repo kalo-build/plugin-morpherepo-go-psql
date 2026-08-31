@@ -22,7 +22,7 @@ func NewTaskRepository(pool *pgxpool.Pool) *TaskRepository {
 
 // GetAll retrieves all Task records with optional filters.
 func (r *TaskRepository) GetAll(ctx context.Context, projectID *string) ([]models.Task, error) {
-	query := `SELECT id, status, title, project_id FROM tasks`
+	query := `SELECT id, (SELECT value FROM task_statuses WHERE id = status_id), title, project_id FROM tasks`
 
 	var conditions []string
 	var args []interface{}
@@ -61,7 +61,7 @@ func (r *TaskRepository) GetAll(ctx context.Context, projectID *string) ([]model
 
 // GetByID retrieves a Task by primary.
 func (r *TaskRepository) GetByID(ctx context.Context, id string) (*models.Task, error) {
-	query := `SELECT id, status, title, project_id FROM tasks WHERE id = $1`
+	query := `SELECT id, (SELECT value FROM task_statuses WHERE id = status_id), title, project_id FROM tasks WHERE id = $1`
 
 	var m models.Task
 	err := r.pool.QueryRow(ctx, query, id).Scan(&m.ID, &m.Status, &m.Title, &m.ProjectID)
@@ -74,7 +74,7 @@ func (r *TaskRepository) GetByID(ctx context.Context, id string) (*models.Task, 
 
 // Create inserts a new Task record.
 func (r *TaskRepository) Create(ctx context.Context, input *models.Task) (*models.Task, error) {
-	query := `INSERT INTO tasks (id, status, title, project_id) VALUES ($1, $2, $3, $4) RETURNING id, status, title, project_id`
+	query := `INSERT INTO tasks (id, status_id, title, project_id) VALUES ($1, (SELECT id FROM task_statuses WHERE value = $2), $3, $4) RETURNING id, (SELECT value FROM task_statuses WHERE id = status_id), title, project_id`
 
 	var m models.Task
 	err := r.pool.QueryRow(ctx, query, input.ID, input.Status, input.Title, input.ProjectID).Scan(&m.ID, &m.Status, &m.Title, &m.ProjectID)
@@ -87,7 +87,7 @@ func (r *TaskRepository) Create(ctx context.Context, input *models.Task) (*model
 
 // Update modifies an existing Task record.
 func (r *TaskRepository) Update(ctx context.Context, id string, input *models.Task) (*models.Task, error) {
-	query := `UPDATE tasks SET status = $2, title = $3, project_id = $4 WHERE id = $1 RETURNING id, status, title, project_id`
+	query := `UPDATE tasks SET status_id = (SELECT id FROM task_statuses WHERE value = $2), title = $3, project_id = $4 WHERE id = $1 RETURNING id, (SELECT value FROM task_statuses WHERE id = status_id), title, project_id`
 
 	var m models.Task
 	err := r.pool.QueryRow(ctx, query, id, input.Status, input.Title, input.ProjectID).Scan(&m.ID, &m.Status, &m.Title, &m.ProjectID)
@@ -109,7 +109,7 @@ func (r *TaskRepository) Delete(ctx context.Context, id string) error {
 // Query finds Task records matching the non-zero fields of the example struct.
 // Non-nil relation pointers trigger JOINs; populated fields on relations add WHERE conditions.
 func (r *TaskRepository) Query(ctx context.Context, example *models.Task) ([]models.Task, error) {
-	selectCols := []string{"t.id", "t.status", "t.title", "t.project_id"}
+	selectCols := []string{"t.id", "(SELECT value FROM task_statuses WHERE id = t.status_id)", "t.title", "t.project_id"}
 	joins := []string{}
 	conditions := []string{}
 	args := []interface{}{}
@@ -121,7 +121,7 @@ func (r *TaskRepository) Query(ctx context.Context, example *models.Task) ([]mod
 		paramIdx++
 	}
 	if example.Status != "" {
-		conditions = append(conditions, fmt.Sprintf("t.status = $%d", paramIdx))
+		conditions = append(conditions, fmt.Sprintf("t.status_id = (SELECT id FROM task_statuses WHERE value = $%d)", paramIdx))
 		args = append(args, example.Status)
 		paramIdx++
 	}
@@ -130,7 +130,7 @@ func (r *TaskRepository) Query(ctx context.Context, example *models.Task) ([]mod
 		args = append(args, example.Title)
 		paramIdx++
 	}
-	if example.ProjectID != nil && *example.ProjectID != "" {
+	if example.ProjectID != nil {
 		conditions = append(conditions, fmt.Sprintf("t.project_id = $%d", paramIdx))
 		args = append(args, *example.ProjectID)
 		paramIdx++
@@ -146,9 +146,9 @@ func (r *TaskRepository) Query(ctx context.Context, example *models.Task) ([]mod
 			args = append(args, example.Project.Code)
 			paramIdx++
 		}
-		if example.Project.Description != "" {
+		if example.Project.Description != nil {
 			conditions = append(conditions, fmt.Sprintf("p.description = $%d", paramIdx))
-			args = append(args, example.Project.Description)
+			args = append(args, *example.Project.Description)
 			paramIdx++
 		}
 		if example.Project.ID != "" {

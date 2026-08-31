@@ -21,7 +21,7 @@ type relationInfo struct {
 
 // extractForOneRelations extracts ForOne relation metadata from a model,
 // looking up target model columns from the registry.
-func extractForOneRelations(model yaml.Model, allModels map[string]yaml.Model, usedAliases map[string]bool) []relationInfo {
+func extractForOneRelations(model yaml.Model, allModels map[string]yaml.Model, allEnums map[string]yaml.Enum, usedAliases map[string]bool) []relationInfo {
 	var relations []relationInfo
 
 	relNames := sortedMapKeys(model.Related)
@@ -31,7 +31,6 @@ func extractForOneRelations(model yaml.Model, allModels map[string]yaml.Model, u
 			continue
 		}
 
-		// The target model name defaults to the relation name (e.g., Organization)
 		targetModelName := relName
 
 		targetModel, ok := allModels[targetModelName]
@@ -39,16 +38,31 @@ func extractForOneRelations(model yaml.Model, allModels map[string]yaml.Model, u
 			continue
 		}
 
-		// Extract direct columns of the target model (no FK columns)
 		var targetCols []columnInfo
 		fieldNames := sortedMapKeys(targetModel.Fields)
 		for _, fname := range fieldNames {
-			targetCols = append(targetCols, columnInfo{
+			field := targetModel.Fields[fname]
+			isOptional := false
+			for _, attr := range field.Attributes {
+				if attr == "optional" {
+					isOptional = true
+					break
+				}
+			}
+			col := columnInfo{
 				columnName: toSnakeCase(fname),
 				fieldName:  fname,
-				isPointer:  false,
-				morpheType: string(targetModel.Fields[fname].Type),
-			})
+				isPointer:  isOptional,
+				morpheType: string(field.Type),
+			}
+			if allEnums != nil && !yaml.IsModelFieldTypePrimitive(field.Type) {
+				if enum, ok := allEnums[string(field.Type)]; ok {
+					col.columnName = toSnakeCase(fname) + "_id"
+					col.isEnum = true
+					col.enumTableName = pluralize(toSnakeCase(enum.Name))
+				}
+			}
+			targetCols = append(targetCols, col)
 		}
 
 		targetTable := tableName(targetModelName)
@@ -95,26 +109,28 @@ func assignTableAlias(tbl string, used map[string]bool) string {
 }
 
 // writeQuery generates the Query method for query-by-example.
-func writeQuery(b *strings.Builder, spec repo.RepoSpec, model yaml.Model, columns []columnInfo, table string, modelsPkg string, allModels map[string]yaml.Model) {
+func writeQuery(b *strings.Builder, spec repo.RepoSpec, model yaml.Model, columns []columnInfo, table string, modelsPkg string, allModels map[string]yaml.Model, allEnums map[string]yaml.Enum) {
 	structName := spec.Model + "Repository"
 
-	// Assign aliases
 	usedAliases := map[string]bool{}
 	rootAlias := assignTableAlias(table, usedAliases)
-	relations := extractForOneRelations(model, allModels, usedAliases)
+	relations := extractForOneRelations(model, allModels, allEnums, usedAliases)
 
 	b.WriteString(fmt.Sprintf("// Query finds %s records matching the non-zero fields of the example struct.\n", spec.Model))
 	b.WriteString("// Non-nil relation pointers trigger JOINs; populated fields on relations add WHERE conditions.\n")
 	b.WriteString(fmt.Sprintf("func (r *%s) Query(ctx context.Context, example *%s.%s) ([]%s.%s, error) {\n",
 		structName, modelsPkg, spec.Model, modelsPkg, spec.Model))
 
-	// Base select columns (aliased)
 	b.WriteString("\tselectCols := []string{")
 	for i, c := range columns {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		b.WriteString(fmt.Sprintf("%q", rootAlias+"."+c.columnName))
+		if c.isEnum {
+			b.WriteString(fmt.Sprintf("%q", fmt.Sprintf("(SELECT value FROM %s WHERE id = %s.%s)", c.enumTableName, rootAlias, c.columnName)))
+		} else {
+			b.WriteString(fmt.Sprintf("%q", rootAlias+"."+c.columnName))
+		}
 	}
 	b.WriteString("}\n")
 
@@ -125,14 +141,17 @@ func writeQuery(b *strings.Builder, spec repo.RepoSpec, model yaml.Model, column
 	b.WriteString("\targs := []interface{}{}\n")
 	b.WriteString("\tparamIdx := 1\n\n")
 
-	// Root scalar field checks
 	for _, c := range columns {
 		check := zeroValueCheck("example", c.fieldName, c.isPointer, c.morpheType)
 		if check == "" {
 			continue
 		}
 		b.WriteString(fmt.Sprintf("\tif %s {\n", check))
-		b.WriteString(fmt.Sprintf("\t\tconditions = append(conditions, fmt.Sprintf(\"%s.%s = $%%d\", paramIdx))\n", rootAlias, c.columnName))
+		if c.isEnum {
+			b.WriteString(fmt.Sprintf("\t\tconditions = append(conditions, fmt.Sprintf(\"%s.%s = (SELECT id FROM %s WHERE value = $%%d)\", paramIdx))\n", rootAlias, c.columnName, c.enumTableName))
+		} else {
+			b.WriteString(fmt.Sprintf("\t\tconditions = append(conditions, fmt.Sprintf(\"%s.%s = $%%d\", paramIdx))\n", rootAlias, c.columnName))
+		}
 		b.WriteString(fmt.Sprintf("\t\targs = append(args, %s)\n", argValue("example", c.fieldName, c.isPointer)))
 		b.WriteString("\t\tparamIdx++\n")
 		b.WriteString("\t}\n")
@@ -157,24 +176,30 @@ func writeQuery(b *strings.Builder, spec repo.RepoSpec, model yaml.Model, column
 			rootAlias, rel.fkColumn,
 			rel.targetAlias, targetPKColumn))
 
-		// Add target columns to select
 		b.WriteString("\t\tselectCols = append(selectCols, ")
 		for i, tc := range rel.targetColumns {
 			if i > 0 {
 				b.WriteString(", ")
 			}
-			b.WriteString(fmt.Sprintf("%q", rel.targetAlias+"."+tc.columnName))
+			if tc.isEnum {
+				b.WriteString(fmt.Sprintf("%q", fmt.Sprintf("(SELECT value FROM %s WHERE id = %s.%s)", tc.enumTableName, rel.targetAlias, tc.columnName)))
+			} else {
+				b.WriteString(fmt.Sprintf("%q", rel.targetAlias+"."+tc.columnName))
+			}
 		}
 		b.WriteString(")\n")
 
-		// Nested field conditions
 		for _, tc := range rel.targetColumns {
 			check := zeroValueCheck(fmt.Sprintf("example.%s", rel.fieldName), tc.fieldName, tc.isPointer, tc.morpheType)
 			if check == "" {
 				continue
 			}
 			b.WriteString(fmt.Sprintf("\t\tif %s {\n", check))
-			b.WriteString(fmt.Sprintf("\t\t\tconditions = append(conditions, fmt.Sprintf(\"%s.%s = $%%d\", paramIdx))\n", rel.targetAlias, tc.columnName))
+			if tc.isEnum {
+				b.WriteString(fmt.Sprintf("\t\t\tconditions = append(conditions, fmt.Sprintf(\"%s.%s = (SELECT id FROM %s WHERE value = $%%d)\", paramIdx))\n", rel.targetAlias, tc.columnName, tc.enumTableName))
+			} else {
+				b.WriteString(fmt.Sprintf("\t\t\tconditions = append(conditions, fmt.Sprintf(\"%s.%s = $%%d\", paramIdx))\n", rel.targetAlias, tc.columnName))
+			}
 			b.WriteString(fmt.Sprintf("\t\t\targs = append(args, %s)\n", argValue(fmt.Sprintf("example.%s", rel.fieldName), tc.fieldName, tc.isPointer)))
 			b.WriteString("\t\t\tparamIdx++\n")
 			b.WriteString("\t\t}\n")
@@ -279,7 +304,7 @@ func writeQueryOne(b *strings.Builder, spec repo.RepoSpec, modelsPkg string) {
 func zeroValueCheck(receiver string, fieldName string, isPointer bool, morpheType string) string {
 	accessor := receiver + "." + fieldName
 	if isPointer {
-		return fmt.Sprintf("%s != nil && *%s != \"\"", accessor, accessor)
+		return fmt.Sprintf("%s != nil", accessor)
 	}
 	switch morpheType {
 	case "UUID", "String", "":
@@ -288,7 +313,7 @@ func zeroValueCheck(receiver string, fieldName string, isPointer bool, morpheTyp
 		return fmt.Sprintf("%s != 0", accessor)
 	case "Float":
 		return fmt.Sprintf("%s != 0", accessor)
-	case "Timestamp", "Time":
+	case "Timestamp", "Time", "Date":
 		return fmt.Sprintf("!%s.IsZero()", accessor)
 	case "Boolean":
 		return "" // skip — ambiguous zero value

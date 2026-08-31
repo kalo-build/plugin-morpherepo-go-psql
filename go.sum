@@ -4,8 +4,8 @@ github.com/kalo-build/clone v0.0.0-20250329082958-41db0353412f h1:R504QVH8R/49EA
 github.com/kalo-build/clone v0.0.0-20250329082958-41db0353412f/go.mod h1:mrEbrIr3UerZqKbz6hBrYRVaIBt65WQqlAi2eIQD2Ao=
 github.com/kalo-build/go-util v0.0.0-20250329083327-00e97aeff9b7 h1:JMOvOOWnDukJAfbJO/x6W/Fgl5ewcZyNQEqt5WxpGQ8=
 github.com/kalo-build/go-util v0.0.0-20250329083327-00e97aeff9b7/go.mod h1:HYeT4Vurfb0EcbqZeTf0sUY5rGXt/sx4liwsiRUc7Sw=
-github.com/kalo-build/morphe-go v0.0.0-20251016080731-9aae9ab2af3e h1:zG+lRSE8FXNhBfZI76zpBn4kgSw2Ab+qByhWKJf4w+U=
-github.com/kalo-build/morphe-go v0.0.0-20251016080731-9aae9ab2af3e/go.mod h1:89ihkv1NRJoTFfE6nBTF2mA0A6cYAi8WuEZ2S6p1JB4=
+github.com/kalo-build/morphe-go v0.0.0-20260312144523-0841ef1ee9f8 h1:G9CLNG1UBYrbt2Tzgw1st6aTZ1SUbGEGPtvvihu9ONY=
+github.com/kalo-build/morphe-go v0.0.0-20260312144523-0841ef1ee9f8/go.mod h1:89ihkv1NRJoTFfE6nBTF2mA0A6cYAi8WuEZ2S6p1JB4=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/stretchr/testify v1.9.0 h1:HtqpIVDClZ4nwg75+f6Lvsy/wHu+3BoSGCbBAcpTsTg=

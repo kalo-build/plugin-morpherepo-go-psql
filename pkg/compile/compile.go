@@ -31,6 +31,7 @@ func MorpheRepoToGoPSQL(config cfg.CompileConfig) error {
 	}
 
 	allModels := r.GetAllModels()
+	allEnums := r.GetAllEnums()
 
 	// Ensure output directory exists
 	if err := os.MkdirAll(config.OutputDirPath, 0755); err != nil {
@@ -44,7 +45,7 @@ func MorpheRepoToGoPSQL(config cfg.CompileConfig) error {
 			return fmt.Errorf("morphe model %q not found in registry (referenced by %s)", spec.Model, spec.Name)
 		}
 
-		code := GenerateRepository(spec, model, allModels, config)
+		code := GenerateRepository(spec, model, allModels, allEnums, config)
 
 		fileName := toSnakeCase(spec.Model) + "_repository.go"
 		if err := writeFormattedGoFile(config.OutputDirPath, fileName, code); err != nil {

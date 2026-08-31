@@ -4,7 +4,7 @@ go 1.21.6
 
 require (
 	github.com/kalo-build/go-util v0.0.0-20250329083327-00e97aeff9b7
-	github.com/kalo-build/morphe-go v0.0.0-20251016080731-9aae9ab2af3e
+	github.com/kalo-build/morphe-go v0.0.0-20260312144523-0841ef1ee9f8
 	github.com/kalo-build/plugin-morpherepo-go v0.0.0-00010101000000-000000000000
 	github.com/stretchr/testify v1.9.0
 )

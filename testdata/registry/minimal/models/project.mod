@@ -8,6 +8,8 @@ fields:
     type: String
   Description:
     type: String
+    attributes:
+      - optional
 identifiers:
   primary: ID
   code: Code

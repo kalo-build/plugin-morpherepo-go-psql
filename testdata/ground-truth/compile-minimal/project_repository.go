@@ -133,9 +133,9 @@ func (r *ProjectRepository) Query(ctx context.Context, example *models.Project) 
 		args = append(args, example.Code)
 		paramIdx++
 	}
-	if example.Description != "" {
+	if example.Description != nil {
 		conditions = append(conditions, fmt.Sprintf("p.description = $%d", paramIdx))
-		args = append(args, example.Description)
+		args = append(args, *example.Description)
 		paramIdx++
 	}
 	if example.ID != "" {
@@ -148,9 +148,9 @@ func (r *ProjectRepository) Query(ctx context.Context, example *models.Project) 
 		args = append(args, example.Name)
 		paramIdx++
 	}
-	if example.OrganizationID != nil && *example.OrganizationID != "" {
+	if example.OrganizationID != "" {
 		conditions = append(conditions, fmt.Sprintf("p.organization_id = $%d", paramIdx))
-		args = append(args, *example.OrganizationID)
+		args = append(args, example.OrganizationID)
 		paramIdx++
 	}
 

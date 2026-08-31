@@ -13,21 +13,23 @@ import (
 
 // columnInfo describes a database column and its mapping to a Go model field.
 type columnInfo struct {
-	columnName string // SQL column name (snake_case)
-	fieldName  string // Go struct field name (PascalCase)
-	isPointer  bool   // whether the Go field is a pointer (e.g., *string for FK)
-	morpheType string // Morphe field type (e.g., "UUID", "String"); empty for FK columns
+	columnName    string // SQL column name (snake_case); for enums this is the FK column (e.g., "status_id")
+	fieldName     string // Go struct field name (PascalCase)
+	isPointer     bool   // whether the Go field is a pointer (e.g., *string for FK)
+	morpheType    string // Morphe field type (e.g., "UUID", "String"); empty for FK columns
+	isEnum        bool   // true if this field references an enum lookup table
+	enumTableName string // pluralized snake_case enum table name (e.g., "project_statuses")
 }
 
 // GenerateRepository generates a Go file with a concrete pgxpool-backed repository
 // implementation for the given repo spec and morphe model.
-func GenerateRepository(spec repo.RepoSpec, model yaml.Model, allModels map[string]yaml.Model, config cfg.CompileConfig) string {
+func GenerateRepository(spec repo.RepoSpec, model yaml.Model, allModels map[string]yaml.Model, allEnums map[string]yaml.Enum, config cfg.CompileConfig) string {
 	var b strings.Builder
 
 	repoPkg := config.RepoPackageName()
 	modelsPkg := config.ModelsPackageName()
 	table := tableName(spec.Model)
-	columns := extractColumns(model)
+	columns := extractColumns(model, allEnums)
 
 	// Package declaration
 	b.WriteString(fmt.Sprintf("package %s\n\n", repoPkg))
@@ -79,26 +81,46 @@ func GenerateRepository(spec repo.RepoSpec, model yaml.Model, allModels map[stri
 		writeDelete(&b, spec, table)
 	}
 
-	// Generate Query/QueryOne (always generated)
-	writeQuery(&b, spec, model, columns, table, modelsPkg, allModels)
+	writeQuery(&b, spec, model, columns, table, modelsPkg, allModels, allEnums)
 	writeQueryOne(&b, spec, modelsPkg)
 
 	return b.String()
 }
 
 // extractColumns derives the full column list from a morphe model.
-func extractColumns(model yaml.Model) []columnInfo {
+// When allEnums is provided, fields whose type matches a known enum get
+// mapped to FK columns (e.g., "status" -> "status_id") with enum metadata.
+func extractColumns(model yaml.Model, allEnums map[string]yaml.Enum) []columnInfo {
 	var columns []columnInfo
 
 	// Direct fields (sorted by name)
 	fieldNames := sortedMapKeys(model.Fields)
 	for _, name := range fieldNames {
-		columns = append(columns, columnInfo{
+		field := model.Fields[name]
+		isOptional := false
+		for _, attr := range field.Attributes {
+			if attr == "optional" {
+				isOptional = true
+				break
+			}
+		}
+
+		col := columnInfo{
 			columnName: toSnakeCase(name),
 			fieldName:  name,
-			isPointer:  false,
-			morpheType: string(model.Fields[name].Type),
-		})
+			isPointer:  isOptional,
+			morpheType: string(field.Type),
+		}
+
+		if !yaml.IsModelFieldTypePrimitive(field.Type) {
+			if enum, ok := allEnums[string(field.Type)]; ok {
+				col.columnName = toSnakeCase(name) + "_id"
+				col.isEnum = true
+				col.enumTableName = pluralize(toSnakeCase(enum.Name))
+			}
+		}
+
+		columns = append(columns, col)
 	}
 
 	// FK fields from relations (sorted by relation name)
@@ -107,11 +129,18 @@ func extractColumns(model yaml.Model) []columnInfo {
 		rel := model.Related[relName]
 		switch rel.Type {
 		case "ForOne":
+			isOptional := false
+			for _, attr := range rel.Attributes {
+				if attr == "optional" {
+					isOptional = true
+					break
+				}
+			}
 			columns = append(columns, columnInfo{
 				columnName: toSnakeCase(relName) + "_id",
 				fieldName:  relName + "ID",
-				isPointer:  true,
-				morpheType: "", // FK pointer field
+				isPointer:  isOptional,
+				morpheType: "",
 			})
 		case "ForOnePoly":
 			through := relName
@@ -176,6 +205,60 @@ func scanArgs(columns []columnInfo) string {
 	return strings.Join(parts, ", ")
 }
 
+// selectColumnsForRead builds a column list for SELECT that resolves enum FKs
+// to their string values via scalar subqueries.
+func selectColumnsForRead(columns []columnInfo, alias string) string {
+	parts := make([]string, len(columns))
+	for i, c := range columns {
+		if c.isEnum {
+			qualifiedCol := c.columnName
+			if alias != "" {
+				qualifiedCol = alias + "." + c.columnName
+			}
+			parts[i] = fmt.Sprintf("(SELECT value FROM %s WHERE id = %s)", c.enumTableName, qualifiedCol)
+		} else {
+			if alias != "" {
+				parts[i] = alias + "." + c.columnName
+			} else {
+				parts[i] = c.columnName
+			}
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+// returningColumns builds a RETURNING clause that resolves enum FKs back to
+// their string values. In RETURNING context, columns are unqualified.
+func returningColumns(columns []columnInfo) string {
+	parts := make([]string, len(columns))
+	for i, c := range columns {
+		if c.isEnum {
+			parts[i] = fmt.Sprintf("(SELECT value FROM %s WHERE id = %s)", c.enumTableName, c.columnName)
+		} else {
+			parts[i] = c.columnName
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+// insertPlaceholder returns the VALUES placeholder for a column.
+// For enum columns, wraps in a subquery to look up the FK.
+func insertPlaceholder(c columnInfo, paramIdx int) string {
+	if c.isEnum {
+		return fmt.Sprintf("(SELECT id FROM %s WHERE value = $%d)", c.enumTableName, paramIdx)
+	}
+	return fmt.Sprintf("$%d", paramIdx)
+}
+
+// updateSetExpr returns the SET expression for a column.
+// For enum columns, wraps the value in a subquery to look up the FK.
+func updateSetExpr(c columnInfo, paramIdx int) string {
+	if c.isEnum {
+		return fmt.Sprintf("%s = (SELECT id FROM %s WHERE value = $%d)", c.columnName, c.enumTableName, paramIdx)
+	}
+	return fmt.Sprintf("%s = $%d", c.columnName, paramIdx)
+}
+
 // writeGetAll generates the GetAll method with optional filters.
 func writeGetAll(b *strings.Builder, spec repo.RepoSpec, model yaml.Model, columns []columnInfo, table string, modelsPkg string, hasFilters bool) {
 	// Build method signature
@@ -188,7 +271,7 @@ func writeGetAll(b *strings.Builder, spec repo.RepoSpec, model yaml.Model, colum
 	b.WriteString(fmt.Sprintf("// GetAll retrieves all %s records with optional filters.\n", spec.Model))
 	b.WriteString(fmt.Sprintf("func (r *%sRepository) GetAll(%s) ([]%s.%s, error) {\n", spec.Model, paramStr, modelsPkg, spec.Model))
 
-	cols := selectColumns(columns, "")
+	cols := selectColumnsForRead(columns, "")
 	b.WriteString(fmt.Sprintf("\tquery := `SELECT %s FROM %s`\n", cols, table))
 
 	if hasFilters {
@@ -256,7 +339,7 @@ func writeGetByIdentifier(b *strings.Builder, spec repo.RepoSpec, id repo.Identi
 	b.WriteString(fmt.Sprintf("func (r *%sRepository) %s(ctx context.Context, %s string) (*%s.%s, error) {\n",
 		spec.Model, methodName, paramName, modelsPkg, spec.Model))
 
-	cols := selectColumns(columns, "")
+	cols := selectColumnsForRead(columns, "")
 	b.WriteString(fmt.Sprintf("\tquery := `SELECT %s FROM %s WHERE %s = $1`\n\n",
 		cols, table, whereCol))
 
@@ -276,20 +359,19 @@ func writeCreate(b *strings.Builder, spec repo.RepoSpec, columns []columnInfo, t
 	b.WriteString(fmt.Sprintf("func (r *%sRepository) Create(ctx context.Context, input *%s.%s) (*%s.%s, error) {\n",
 		spec.Model, modelsPkg, spec.Model, modelsPkg, spec.Model))
 
-	// Build column list and parameter placeholders
 	colNames := make([]string, len(columns))
 	placeholders := make([]string, len(columns))
 	inputArgs := make([]string, len(columns))
 	for i, c := range columns {
 		colNames[i] = c.columnName
-		placeholders[i] = fmt.Sprintf("$%d", i+1)
+		placeholders[i] = insertPlaceholder(c, i+1)
 		inputArgs[i] = "input." + c.fieldName
 	}
 
 	colStr := strings.Join(colNames, ", ")
 	phStr := strings.Join(placeholders, ", ")
 	inputStr := strings.Join(inputArgs, ", ")
-	retCols := selectColumns(columns, "")
+	retCols := returningColumns(columns)
 
 	b.WriteString(fmt.Sprintf("\tquery := `INSERT INTO %s (%s) VALUES (%s) RETURNING %s`\n\n",
 		table, colStr, phStr, retCols))
@@ -310,13 +392,11 @@ func writeUpdate(b *strings.Builder, spec repo.RepoSpec, model yaml.Model, colum
 	b.WriteString(fmt.Sprintf("func (r *%sRepository) Update(ctx context.Context, id string, input *%s.%s) (*%s.%s, error) {\n",
 		spec.Model, modelsPkg, spec.Model, modelsPkg, spec.Model))
 
-	// Find primary ID field name
 	primaryField := "ID"
 	if pid, ok := spec.Identifiers["primary"]; ok && len(pid.Fields) > 0 {
 		primaryField = pid.Fields[0].Name
 	}
 
-	// Build SET clause: all columns except primary ID and CreatedAt
 	var setCols []string
 	var setArgs []string
 	paramIdx := 1 // $1 is reserved for the WHERE id
@@ -326,15 +406,14 @@ func writeUpdate(b *strings.Builder, spec repo.RepoSpec, model yaml.Model, colum
 			continue
 		}
 		paramIdx++
-		setCols = append(setCols, fmt.Sprintf("%s = $%d", c.columnName, paramIdx))
+		setCols = append(setCols, updateSetExpr(c, paramIdx))
 		setArgs = append(setArgs, "input."+c.fieldName)
 	}
 
 	setStr := strings.Join(setCols, ", ")
-	retCols := selectColumns(columns, "")
+	retCols := returningColumns(columns)
 	whereCol := toSnakeCase(primaryField)
 
-	// Build full args: id first, then set values
 	allArgs := append([]string{"id"}, setArgs...)
 	argStr := strings.Join(allArgs, ", ")
 

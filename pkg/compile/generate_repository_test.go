@@ -58,9 +58,8 @@ func (suite *GenerateRepositoryTestSuite) TestGenerateRepository_SimpleModel() {
 	}
 
 	allModels := map[string]yaml.Model{"Organization": model}
-	code := compile.GenerateRepository(spec, model, allModels, suite.Config)
+	code := compile.GenerateRepository(spec, model, allModels, nil, suite.Config)
 
-	// Verify package
 	suite.Contains(code, "package repo")
 
 	// Verify struct
@@ -130,7 +129,7 @@ func (suite *GenerateRepositoryTestSuite) TestGenerateRepository_ModelWithForOne
 			"ID":          {Type: "UUID"},
 			"Code":        {Type: "String"},
 			"Name":        {Type: "String"},
-			"Description": {Type: "String"},
+			"Description": {Type: "String", Attributes: []string{"optional"}},
 		},
 		Related: map[string]yaml.ModelRelation{
 			"Organization": {Type: "ForOne"},
@@ -150,7 +149,7 @@ func (suite *GenerateRepositoryTestSuite) TestGenerateRepository_ModelWithForOne
 		Related: map[string]yaml.ModelRelation{},
 	}
 	allModels := map[string]yaml.Model{"Project": model, "Organization": orgModel}
-	code := compile.GenerateRepository(spec, model, allModels, suite.Config)
+	code := compile.GenerateRepository(spec, model, allModels, nil, suite.Config)
 
 	// Verify imports include fmt and strings
 	suite.Contains(code, "\"fmt\"")
@@ -176,6 +175,11 @@ func (suite *GenerateRepositoryTestSuite) TestGenerateRepository_ModelWithForOne
 	suite.Contains(code, "example.Organization != nil")
 	suite.Contains(code, "JOIN organizations o ON")
 	suite.Contains(code, "m.Organization = &relOrganization")
+
+	// Verify optional field uses pointer check
+	suite.Contains(code, "example.Description != nil")
+	suite.NotContains(code, "example.Description != \"\"")
+	suite.Contains(code, "*example.Description")
 
 	// Verify QueryOne
 	suite.Contains(code, "func (r *ProjectRepository) QueryOne(ctx context.Context, example *models.Project) (*models.Project, error)")
@@ -204,23 +208,24 @@ func (suite *GenerateRepositoryTestSuite) TestGenerateRepository_OnlyPrimaryIden
 			"Status": {Type: "String"},
 		},
 		Related: map[string]yaml.ModelRelation{
-			"Project": {Type: "ForOne"},
+			"Project": {Type: "ForOne", Attributes: []string{"optional"}},
 		},
 	}
 
 	projectModel := yaml.Model{
 		Name: "Project",
 		Fields: map[string]yaml.ModelField{
-			"ID":   {Type: "UUID"},
-			"Code": {Type: "String"},
-			"Name": {Type: "String"},
+			"ID":          {Type: "UUID"},
+			"Code":        {Type: "String"},
+			"Name":        {Type: "String"},
+			"Description": {Type: "String", Attributes: []string{"optional"}},
 		},
 		Identifiers: map[string]yaml.ModelIdentifier{
 			"primary": {Fields: []string{"ID"}},
 		},
 	}
 	allModels := map[string]yaml.Model{"Task": model, "Project": projectModel}
-	code := compile.GenerateRepository(spec, model, allModels, suite.Config)
+	code := compile.GenerateRepository(spec, model, allModels, nil, suite.Config)
 
 	// Only GetByID, no GetByCode
 	suite.Contains(code, "func (r *TaskRepository) GetByID(ctx context.Context, id string)")
@@ -230,10 +235,20 @@ func (suite *GenerateRepositoryTestSuite) TestGenerateRepository_OnlyPrimaryIden
 	suite.Contains(code, "projectID *string")
 	suite.Contains(code, "project_id = $%d")
 
+	// Verify optional FK uses pointer check
+	suite.Contains(code, "example.ProjectID != nil")
+	suite.NotContains(code, "example.ProjectID != \"\"")
+	suite.Contains(code, "*example.ProjectID")
+
 	// Verify Query with Project relation
 	suite.Contains(code, "scanProject := false")
 	suite.Contains(code, "example.Project != nil")
 	suite.Contains(code, "JOIN projects")
+
+	// Verify optional field on joined relation uses pointer check
+	suite.Contains(code, "example.Project.Description != nil")
+	suite.NotContains(code, "example.Project.Description != \"\"")
+	suite.Contains(code, "*example.Project.Description")
 }
 
 func (suite *GenerateRepositoryTestSuite) TestGenerateRepository_PartialOperations() {
@@ -257,7 +272,7 @@ func (suite *GenerateRepositoryTestSuite) TestGenerateRepository_PartialOperatio
 	}
 
 	allModels := map[string]yaml.Model{"Organization": model}
-	code := compile.GenerateRepository(spec, model, allModels, suite.Config)
+	code := compile.GenerateRepository(spec, model, allModels, nil, suite.Config)
 
 	// Should have GetAll and GetByID
 	suite.Contains(code, "GetAll")
@@ -269,6 +284,72 @@ func (suite *GenerateRepositoryTestSuite) TestGenerateRepository_PartialOperatio
 	suite.NotContains(code, "func (r *OrganizationRepository) Delete")
 	suite.Contains(code, "func (r *OrganizationRepository) Query")
 	suite.Contains(code, "func (r *OrganizationRepository) QueryOne")
+}
+
+func (suite *GenerateRepositoryTestSuite) TestGenerateRepository_EnumField() {
+	spec := repo.RepoSpec{
+		Name:  "TaskRepository",
+		Model: "Task",
+		Identifiers: map[string]repo.Identifier{
+			"primary": {Fields: []repo.IdentifierField{{Name: "ID", Type: "UUID"}}},
+		},
+		Filters: []repo.Filter{
+			{Name: "projectID", Type: "UUID", Relation: "Project"},
+		},
+		Operations: repo.Operations{
+			List: true, Get: true, Create: true, Update: true, Delete: true,
+		},
+	}
+
+	model := yaml.Model{
+		Name: "Task",
+		Fields: map[string]yaml.ModelField{
+			"ID":     {Type: "UUID"},
+			"Title":  {Type: "String"},
+			"Status": {Type: "TaskStatus"},
+		},
+		Related: map[string]yaml.ModelRelation{
+			"Project": {Type: "ForOne", Attributes: []string{"optional"}},
+		},
+	}
+
+	allEnums := map[string]yaml.Enum{
+		"TaskStatus": {Name: "TaskStatus", Type: "String", Entries: map[string]any{"Todo": "todo", "InProgress": "in_progress", "Done": "done"}},
+	}
+
+	projectModel := yaml.Model{
+		Name: "Project",
+		Fields: map[string]yaml.ModelField{
+			"ID":   {Type: "UUID"},
+			"Name": {Type: "String"},
+		},
+		Identifiers: map[string]yaml.ModelIdentifier{
+			"primary": {Fields: []string{"ID"}},
+		},
+	}
+	allModels := map[string]yaml.Model{"Task": model, "Project": projectModel}
+	code := compile.GenerateRepository(spec, model, allModels, allEnums, suite.Config)
+
+	// GetAll SELECT should resolve enum via subquery
+	suite.Contains(code, "(SELECT value FROM task_statuses WHERE id = status_id)")
+	suite.NotContains(code, "SELECT id, status, title")
+
+	// GetByID should also use subquery
+	suite.Contains(code, "WHERE id = $1")
+
+	// Create should use subquery for the FK lookup and RETURNING
+	suite.Contains(code, "(SELECT id FROM task_statuses WHERE value = $")
+	suite.Contains(code, "RETURNING")
+
+	// Update SET should use subquery
+	suite.Contains(code, "status_id = (SELECT id FROM task_statuses WHERE value = $")
+
+	// Scan still uses the Go field name
+	suite.Contains(code, "&m.Status")
+
+	// Query method should handle enum in selectCols and conditions
+	suite.Contains(code, "(SELECT value FROM task_statuses WHERE id = t.status_id)")
+	suite.Contains(code, "(SELECT id FROM task_statuses WHERE value = $%d)")
 }
 
 func (suite *GenerateRepositoryTestSuite) TestGenerateRepository_ForOnePoly() {
@@ -296,7 +377,7 @@ func (suite *GenerateRepositoryTestSuite) TestGenerateRepository_ForOnePoly() {
 	}
 
 	allModels := map[string]yaml.Model{"Plugin": model}
-	code := compile.GenerateRepository(spec, model, allModels, suite.Config)
+	code := compile.GenerateRepository(spec, model, allModels, nil, suite.Config)
 
 	// Verify polymorphic columns
 	suite.Contains(code, "owner_id")
