@@ -6,6 +6,8 @@ github.com/kalo-build/go-util v0.0.0-20250329083327-00e97aeff9b7 h1:JMOvOOWnDukJ
 github.com/kalo-build/go-util v0.0.0-20250329083327-00e97aeff9b7/go.mod h1:HYeT4Vurfb0EcbqZeTf0sUY5rGXt/sx4liwsiRUc7Sw=
 github.com/kalo-build/morphe-go v0.0.0-20260312144523-0841ef1ee9f8 h1:G9CLNG1UBYrbt2Tzgw1st6aTZ1SUbGEGPtvvihu9ONY=
 github.com/kalo-build/morphe-go v0.0.0-20260312144523-0841ef1ee9f8/go.mod h1:89ihkv1NRJoTFfE6nBTF2mA0A6cYAi8WuEZ2S6p1JB4=
+github.com/kalo-build/plugin-morpherepo-go v0.0.0-20260831112942-a43ccf101f56 h1:tTw880P/NpwDcX9u8jOs1UPPmwzeq8DLGhWuzNBENBA=
+github.com/kalo-build/plugin-morpherepo-go v0.0.0-20260831112942-a43ccf101f56/go.mod h1:5chu6m4nYhPRaPPcNTK1uBFfdvilt48tjZbSoeIqeLs=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/stretchr/testify v1.9.0 h1:HtqpIVDClZ4nwg75+f6Lvsy/wHu+3BoSGCbBAcpTsTg=
